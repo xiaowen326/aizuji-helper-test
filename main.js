@@ -17,7 +17,13 @@
         // API基础地址
         apiBase: 'https://internet-backend-gateway.woaizuji.com/fundApplication',
         // 默认并发数
-        concurrency: 5,
+        concurrency: 2,
+        // 随机延迟（毫秒），默认2-8秒
+        randomDelay: {
+            enabled: true,
+            min: 2000,
+            max: 8000,
+        },
         // 轮询间隔（毫秒）
         pollInterval: 300,
         // 请求超时
@@ -231,7 +237,7 @@
         },
 
         // 随机延迟（模拟人工操作）
-        randomDelay(min = 200, max = 800) {
+        randomDelay(min = 2000, max = 8000) {
             const delay = Math.floor(Math.random() * (max - min + 1)) + min;
             return this.sleep(delay);
         },
@@ -360,7 +366,7 @@
                                 </div>
                                 <div class="azh-form-group">
                                     <label>并发数：</label>
-                                    <input type="number" id="azh-sms-concurrency" value="5" min="1" max="20" class="azh-input-number">
+                                    <input type="number" id="azh-sms-concurrency" value="2" min="1" max="20" class="azh-input-number">
                                     <span style="font-size:12px;color:#94a3b8;margin-left:8px;">建议5-10</span>
                                 </div>
                                 <div class="azh-form-group">
@@ -410,7 +416,7 @@
                                 </div>
                                 <div class="azh-form-group">
                                     <label>并发数：</label>
-                                    <input type="number" id="azh-collection-concurrency" value="5" min="1" max="20" class="azh-input-number">
+                                    <input type="number" id="azh-collection-concurrency" value="2" min="1" max="20" class="azh-input-number">
                                     <span style="font-size:12px;color:#94a3b8;margin-left:8px;">建议3-5</span>
                                 </div>
                                 <div class="azh-btn-group">
@@ -443,7 +449,8 @@
                                 <h3>⚙️ 设置</h3>
                                 <div class="azh-form-group">
                                     <label>默认并发数：</label>
-                                    <input type="number" id="azh-setting-concurrency" value="5" min="1" max="20" class="azh-input-number">
+                                    <input type="number" id="azh-setting-concurrency" value="2" min="1" max="20" class="azh-input-number">
+                                    <span style="font-size:12px;color:#94a3b8;margin-left:8px;">建议2-5</span>
                                 </div>
                                 <div class="azh-form-group">
                                     <label>
@@ -452,14 +459,15 @@
                                     </label>
                                 </div>
                                 <div class="azh-form-group">
-                                    <label>延迟范围（毫秒）：</label>
+                                    <label>延迟范围（秒）：</label>
                                     <div style="display:flex;gap:8px;align-items:center;">
-                                        <input type="number" id="azh-setting-delay-min" value="200" min="0" class="azh-input-number" style="width:80px;">
+                                        <input type="number" id="azh-setting-delay-min" value="2" min="0" class="azh-input-number" style="width:80px;">
                                         <span>~</span>
-                                        <input type="number" id="azh-setting-delay-max" value="800" min="0" class="azh-input-number" style="width:80px;">
+                                        <input type="number" id="azh-setting-delay-max" value="8" min="0" class="azh-input-number" style="width:80px;">
                                     </div>
                                 </div>
-                                <button id="azh-save-settings" class="azh-btn azh-btn-primary">保存设置</button>
+                                <button id="azh-save-settings" class="azh-btn azh-btn-primary"> 保存设置</button>
+                                <button id="azh-reset-settings" class="azh-btn azh-btn-secondary" style="margin-left:8px;">🔄 恢复默认</button>
                             </div>
                         </div>
                     </div>
@@ -802,7 +810,7 @@
             if (this.isRunning) return;
 
             const mode = document.querySelector('input[name="sms-mode"]:checked')?.value || 'all';
-            const concurrency = parseInt(document.getElementById('azh-sms-concurrency').value) || 5;
+            const concurrency = parseInt(document.getElementById('azh-sms-concurrency').value) || CONFIG.concurrency;
 
             this.isRunning = true;
             this.results = [];
@@ -978,11 +986,8 @@
             }
 
             // 随机延迟（如果设置了）
-            const useDelay = document.getElementById('azh-setting-random-delay')?.checked;
-            if (useDelay) {
-                const min = parseInt(document.getElementById('azh-setting-delay-min')?.value) || 200;
-                const max = parseInt(document.getElementById('azh-setting-delay-max')?.value) || 800;
-                await Utils.randomDelay(min, max);
+            if (CONFIG.randomDelay.enabled) {
+                await Utils.randomDelay(CONFIG.randomDelay.min, CONFIG.randomDelay.max);
             }
 
             // 3. 组装结果
@@ -1038,7 +1043,7 @@
                 return;
             }
 
-            const concurrency = parseInt(document.getElementById('azh-collection-concurrency').value) || 5;
+            const concurrency = parseInt(document.getElementById('azh-collection-concurrency').value) || CONFIG.concurrency;
             const contactResult = document.getElementById('azh-collection-result').value || '6';
             const remark = document.getElementById('azh-collection-remark').value || '无法接通';
             const defaultOpPerson = document.getElementById('azh-collection-opPerson').value || '';
@@ -1285,10 +1290,63 @@
             };
         });
 
-        // 保存设置
+        // 保存设置：写入 CONFIG 并同步到所有模块输入框
         document.getElementById('azh-save-settings').onclick = () => {
-            alert('设置已保存（当前版本为内存存储）');
+            const newConcurrency = parseInt(document.getElementById('azh-setting-concurrency').value) || 2;
+            const delayEnabled = document.getElementById('azh-setting-random-delay').checked;
+            const delayMinSec = parseInt(document.getElementById('azh-setting-delay-min').value) || 2;
+            const delayMaxSec = parseInt(document.getElementById('azh-setting-delay-max').value) || 8;
+            const delayMinMs = delayMinSec * 1000;
+            const delayMaxMs = delayMaxSec * 1000;
+
+            if (delayMinMs > delayMaxMs) {
+                alert('延迟最小值不能大于最大值！');
+                return;
+            }
+
+            // 写入全局配置
+            CONFIG.concurrency = newConcurrency;
+            CONFIG.randomDelay.enabled = delayEnabled;
+            CONFIG.randomDelay.min = delayMinMs;
+            CONFIG.randomDelay.max = delayMaxMs;
+
+            // 同步到批量查订单模块
+            const smsConcurrencyEl = document.getElementById('azh-sms-concurrency');
+            if (smsConcurrencyEl) smsConcurrencyEl.value = newConcurrency;
+
+            // 同步到批量催记模块
+            const colConcurrencyEl = document.getElementById('azh-collection-concurrency');
+            if (colConcurrencyEl) colConcurrencyEl.value = newConcurrency;
+
+            Log.success(`设置已保存：并发=${newConcurrency}，延迟=${delayEnabled ? delayMinSec + '~' + delayMaxSec + '秒' : '关闭'}`);
+            alert(`设置已生效！\n并发数：${newConcurrency}\n延迟：${delayEnabled ? delayMinSec + '~' + delayMaxSec + '秒' : '已关闭'}`);
         };
+
+        // 恢复默认设置
+        document.getElementById('azh-reset-settings').onclick = () => {
+            CONFIG.concurrency = 2;
+            CONFIG.randomDelay.enabled = true;
+            CONFIG.randomDelay.min = 2000;
+            CONFIG.randomDelay.max = 8000;
+
+            document.getElementById('azh-setting-concurrency').value = 2;
+            document.getElementById('azh-setting-random-delay').checked = true;
+            document.getElementById('azh-setting-delay-min').value = 2;
+            document.getElementById('azh-setting-delay-max').value = 8;
+            document.getElementById('azh-sms-concurrency').value = 2;
+            document.getElementById('azh-collection-concurrency').value = 2;
+
+            Log.info('设置已恢复默认值');
+            alert('已恢复默认设置：并发2，延迟2~8秒');
+        };
+
+        // 同步 CONFIG 默认值到设置面板和各模块输入框
+        document.getElementById('azh-setting-concurrency').value = CONFIG.concurrency;
+        document.getElementById('azh-setting-random-delay').checked = CONFIG.randomDelay.enabled;
+        document.getElementById('azh-setting-delay-min').value = CONFIG.randomDelay.min / 1000;
+        document.getElementById('azh-setting-delay-max').value = CONFIG.randomDelay.max / 1000;
+        document.getElementById('azh-sms-concurrency').value = CONFIG.concurrency;
+        document.getElementById('azh-collection-concurrency').value = CONFIG.concurrency;
 
         initialized = true;
         Log.success('初始化完成！爱租机小助手已就绪');
