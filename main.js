@@ -354,6 +354,7 @@
                                     <input type="file" id="azh-collection-file" accept=".xlsx,.xls" class="azh-file-input">
                                     <div class="azh-hint" style="margin-top:6px;font-size:11px;">
                                         需包含：订单号、姓名、手机号、操作人（列名模糊匹配）
+                                        <a href="javascript:void(0)" id="azh-collection-download-template" style="color:#3b82f6;text-decoration:underline;margin-left:8px;">下载模板</a>
                                     </div>
                                 </div>
                                 <div class="azh-form-group">
@@ -1142,6 +1143,19 @@
             Log.success('催记结果已导出');
             UI.appendLog('collection', '💾 结果已导出Excel', 'success');
         },
+
+        async downloadTemplate() {
+            await Utils.ensureXLSX();
+            const templateData = [
+                { 订单号: 'SA2407060066031440', 姓名: '沈庆明', 手机号: '17605226750', 操作人: '鼎益信-丁应文' },
+            ];
+            const ws = XLSX.utils.json_to_sheet(templateData);
+            ws['!cols'] = [{ wch: 22 }, { wch: 12 }, { wch: 15 }, { wch: 18 }];
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, '催记模板');
+            XLSX.writeFile(wb, '爱租机批量催记模板.xlsx');
+            Log.success('模板已下载');
+        },
     };
 
     // ========== 模块3：批量查询还款状态（待实现） ==========
@@ -1170,6 +1184,7 @@
         document.getElementById('azh-sms-export').onclick = async () => SmsModule.export();
         document.getElementById('azh-collection-start').onclick = () => CollectionModule.start();
         document.getElementById('azh-collection-export').onclick = async () => CollectionModule.export();
+        document.getElementById('azh-collection-download-template').onclick = () => CollectionModule.downloadTemplate();
         const repaymentBtn = document.getElementById('azh-repayment-start');
         if (repaymentBtn) repaymentBtn.onclick = () => RepaymentModule.start();
 
