@@ -358,14 +358,12 @@
                                     </div>
                                 </div>
                                 <div class="azh-form-group">
-                                    <label>联系结果：</label>
+                                    <label>联系结果：<span style="font-weight:normal;font-size:11px;color:#94a3b8;margin-left:6px;">默认6（暂时无法联系），可自行修改</span></label>
                                     <input type="text" id="azh-collection-result" value="6" class="azh-input-text">
-                                    <span style="font-size:12px;color:#94a3b8;margin-left:8px;">contactResult</span>
                                 </div>
                                 <div class="azh-form-group">
-                                    <label>备注：</label>
+                                    <label>备注：<span style="font-weight:normal;font-size:11px;color:#94a3b8;margin-left:6px;">默认"无法接通"，可自行修改</span></label>
                                     <input type="text" id="azh-collection-remark" value="无法接通" class="azh-input-text" style="width:100%;">
-                                    <span style="font-size:12px;color:#94a3b8;">remark</span>
                                 </div>
                                 <div class="azh-form-group">
                                     <label>并发数：</label>
