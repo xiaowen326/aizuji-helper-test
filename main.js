@@ -1085,6 +1085,10 @@
 
                 await Utils.asyncPool(concurrency, records, async (record) => {
                     try {
+                        // 随机延迟
+                        if (CONFIG.randomDelay.enabled) {
+                            await Utils.randomDelay(CONFIG.randomDelay.min, CONFIG.randomDelay.max);
+                        }
                         const resp = await API.addContactRecord(record);
                         const ok = resp && (resp.code === 200 || resp.code === 0 || resp.success === true || resp.result === true);
                         const msg = (resp && resp.message) || (resp && resp.msg) || '';
