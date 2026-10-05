@@ -200,6 +200,36 @@
             }
         },
 
+        // 发送GET请求
+        async get(url) {
+            const token = this.getToken();
+            const headers = {
+                'accept': 'application/json, text/plain, */*',
+                'accept-language': 'zh-CN,zh;q=0.9',
+            };
+            if (token) {
+                headers['azjtk'] = token;
+            }
+
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), CONFIG.requestTimeout);
+
+            try {
+                const response = await fetch(url, {
+                    headers,
+                    method: 'GET',
+                    mode: 'cors',
+                    credentials: 'omit',
+                    signal: controller.signal,
+                });
+                clearTimeout(timeoutId);
+                return await response.json();
+            } catch (err) {
+                clearTimeout(timeoutId);
+                throw err;
+            }
+        },
+
         // 随机延迟（模拟人工操作）
         randomDelay(min = 200, max = 800) {
             const delay = Math.floor(Math.random() * (max - min + 1)) + min;
@@ -262,6 +292,13 @@
                 remark: data.remark || '无法接通',
             };
             const result = await Utils.post(url, body);
+            return result;
+        },
+
+        // 获取外部用户列表
+        async getOutUserList() {
+            const url = `${CONFIG.apiBase}/user/outUserList`;
+            const result = await Utils.get(url);
             return result;
         },
     };
@@ -353,9 +390,15 @@
                                     <label>选择Excel文件：</label>
                                     <input type="file" id="azh-collection-file" accept=".xlsx,.xls" class="azh-file-input">
                                     <div class="azh-hint" style="margin-top:6px;font-size:11px;">
-                                        需包含：订单号、姓名、手机号、操作人（列名模糊匹配）
+                                        需包含：订单号、姓名、手机号（列名模糊匹配，操作人可留空使用下方选择）
                                         <a href="javascript:void(0)" id="azh-collection-download-template" style="color:#3b82f6;text-decoration:underline;margin-left:8px;">下载模板</a>
                                     </div>
+                                </div>
+                                <div class="azh-form-group">
+                                    <label>操作人：<span style="font-weight:normal;font-size:11px;color:#94a3b8;margin-left:6px;">Excel未填写时使用此处选择的操作人</span></label>
+                                    <select id="azh-collection-opPerson" class="azh-input-text" style="width:100%;">
+                                        <option value="">加载中...</option>
+                                    </select>
                                 </div>
                                 <div class="azh-form-group">
                                     <label>联系结果：<span style="font-weight:normal;font-size:11px;color:#94a3b8;margin-left:6px;">默认6（暂时无法联系），可自行修改</span></label>
@@ -998,6 +1041,12 @@
             const concurrency = parseInt(document.getElementById('azh-collection-concurrency').value) || 5;
             const contactResult = document.getElementById('azh-collection-result').value || '6';
             const remark = document.getElementById('azh-collection-remark').value || '无法接通';
+            const defaultOpPerson = document.getElementById('azh-collection-opPerson').value || '';
+
+            if (!defaultOpPerson) {
+                alert('请选择操作人！');
+                return;
+            }
 
             this.isRunning = true;
             this.results = [];
@@ -1021,7 +1070,7 @@
                     return;
                 }
 
-                const records = this.parseRecords(data, contactResult, remark);
+                const records = this.parseRecords(data, contactResult, remark, defaultOpPerson);
                 Log.info(`解析出 ${records.length} 条催记记录`);
                 UI.appendLog('collection', `🔍 解析出 ${records.length} 条记录，开始批量添加...`, 'info');
 
@@ -1087,7 +1136,7 @@
         },
 
         // 从Excel数据中提取催记字段
-        parseRecords(data, contactResult, remark) {
+        parseRecords(data, contactResult, remark, defaultOpPerson) {
             const records = [];
             const firstRow = data[0];
             const keys = Object.keys(firstRow);
@@ -1119,17 +1168,53 @@
                 const orderSN = (row[orderKey] || '').toString().trim();
                 if (!orderSN) continue;
 
+                const excelOpPerson = opKey ? (row[opKey] || '').toString().trim() : '';
                 records.push({
                     orderSN: orderSN,
                     userName: nameKey ? (row[nameKey] || '').toString().trim() : '',
                     userPhone: phoneKey ? (row[phoneKey] || '').toString().trim() : '',
-                    opPerson: opKey ? (row[opKey] || '').toString().trim() : '',
+                    opPerson: excelOpPerson || defaultOpPerson || '',
                     contactResult: contactResult,
                     remark: remark,
                 });
             }
 
             return records;
+        },
+
+        // 加载用户列表填充下拉框
+        async loadUserList() {
+            const select = document.getElementById('azh-collection-opPerson');
+            if (!select) return;
+
+            try {
+                select.innerHTML = '<option value="">加载中...</option>';
+                const result = await API.getOutUserList();
+                if (result && result.success && Array.isArray(result.data)) {
+                    const users = result.data;
+                    select.innerHTML = '';
+                    if (users.length === 0) {
+                        select.innerHTML = '<option value="">无可用操作人</option>';
+                        return;
+                    }
+                    users.forEach(user => {
+                        const option = document.createElement('option');
+                        option.value = user.realName || '';
+                        option.textContent = user.realName || user.userName || '未知';
+                        if (user.tenantName) {
+                            option.textContent += `（${user.tenantName}）`;
+                        }
+                        select.appendChild(option);
+                    });
+                    Log.info(`操作人列表加载完成，共${users.length}人`);
+                } else {
+                    select.innerHTML = '<option value="">加载失败</option>';
+                    Log.warn('操作人列表加载失败:', result?.errMsg || '未知错误');
+                }
+            } catch (err) {
+                select.innerHTML = '<option value="">加载失败</option>';
+                Log.error('加载操作人列表失败:', err);
+            }
         },
 
         async export() {
@@ -1145,10 +1230,10 @@
         async downloadTemplate() {
             await Utils.ensureXLSX();
             const templateData = [
-                { 订单号: 'SA2407060066031440', 姓名: '沈庆明', 手机号: '17605226750', 操作人: '鼎益信-丁应文' },
+                { 订单号: 'SA2407060066031440', 姓名: '沈庆明', 手机号: '17605226750' },
             ];
             const ws = XLSX.utils.json_to_sheet(templateData);
-            ws['!cols'] = [{ wch: 22 }, { wch: 12 }, { wch: 15 }, { wch: 18 }];
+            ws['!cols'] = [{ wch: 22 }, { wch: 12 }, { wch: 15 }];
             const wb = XLSX.utils.book_new();
             XLSX.utils.book_append_sheet(wb, ws, '催记模板');
             XLSX.writeFile(wb, '爱租机批量催记模板.xlsx');
@@ -1183,6 +1268,8 @@
         document.getElementById('azh-collection-start').onclick = () => CollectionModule.start();
         document.getElementById('azh-collection-export').onclick = async () => CollectionModule.export();
         document.getElementById('azh-collection-download-template').onclick = () => CollectionModule.downloadTemplate();
+        // 异步加载操作人列表
+        setTimeout(() => CollectionModule.loadUserList(), 500);
         const repaymentBtn = document.getElementById('azh-repayment-start');
         if (repaymentBtn) repaymentBtn.onclick = () => RepaymentModule.start();
 
