@@ -308,17 +308,14 @@
             return result;
         },
 
-        // 查询还款交易明细（分页）
-        async getTransactionDetailPage(orderSN, state, currPage = 1, pageSize = 100) {
+        // 查询还款交易明细（只取前3条）
+        async getTransactionDetailPage(orderSN, pageSize = 3) {
             const url = `${CONFIG.apiBase}/outOverdue/detail/transactionDetailPage`;
             const body = {
                 orderSN: orderSN,
-                state: state !== '' ? state : undefined,
-                currPage: currPage,
+                currPage: 1,
                 pageSize: pageSize,
             };
-            // 移除undefined字段
-            Object.keys(body).forEach(k => body[k] === undefined && delete body[k]);
             const result = await Utils.post(url, body);
             return result;
         },
@@ -467,16 +464,8 @@
                                     <input type="file" id="azh-repayment-file" accept=".xlsx,.xls" class="azh-file-input">
                                     <div class="azh-hint" style="margin-top:6px;font-size:11px;">需包含订单号列（列名模糊匹配）</div>
                                 </div>
-                                <div class="azh-form-group">
-                                    <label>还款状态：</label>
-                                    <select id="azh-repayment-state" class="azh-input-text" style="width:100%;">
-                                        <option value="2">全部成功记录</option>
-                                        <option value="">全部状态</option>
-                                        <option value="1">处理中</option>
-                                        <option value="3">失败</option>
-                                        <option value="4">作废</option>
-                                        <option value="5">退票</option>
-                                    </select>
+                                <div class="azh-hint" style="font-size:11px;color:#94a3b8;margin-bottom:8px;">
+                                    💡 每个订单取最近3条还款记录
                                 </div>
                                 <div class="azh-form-group">
                                     <label>并发数：</label>
@@ -1318,7 +1307,6 @@
             if (this.isRunning) return;
 
             const mode = document.querySelector('input[name="repayment-mode"]:checked').value;
-            const state = document.getElementById('azh-repayment-state').value;
             const concurrency = parseInt(document.getElementById('azh-repayment-concurrency').value) || CONFIG.concurrency;
 
             let orderSNs = [];
@@ -1390,35 +1378,22 @@
                             await Utils.randomDelay(CONFIG.randomDelay.min, CONFIG.randomDelay.max);
                         }
 
-                        const allRecords = [];
-                        let currPage = 1;
-                        let totalPages = 1;
-
-                        while (currPage <= totalPages) {
-                            const resp = await API.getTransactionDetailPage(orderSN, state, currPage, 100);
-                            if (resp && resp.success && resp.data) {
-                                const list = resp.data.records || resp.data.list || [];
-                                const totalCount = resp.data.totalCount || resp.data.total || 0;
-                                totalPages = Math.ceil(totalCount / 100) || 1;
-                                allRecords.push(...list);
-                            } else {
-                                break;
-                            }
-                            currPage++;
+                        const resp = await API.getTransactionDetailPage(orderSN, 3);
+                        let allRecords = [];
+                        if (resp && resp.success && resp.data) {
+                            const list = resp.data.data || resp.data.records || resp.data.list || [];
+                            allRecords = list.slice(0, 3);
                         }
 
                         if (allRecords.length > 0) {
                             hasRecordCount++;
                             for (const record of allRecords) {
                                 this.results.push({
-                                    '订单号': orderSN,
-                                    '交易流水号': record.tradeNo || record.serialNo || '',
-                                    '交易金额': record.amount || record.payAmount || '',
-                                    '交易类型': record.bizType || record.tradeType || '',
-                                    '交易时间': record.createTime || record.payTime || record.tradeTime || '',
-                                    '状态': this._formatState(record.state),
-                                    '支付方式': record.payChannel || record.payWay || '',
-                                    '备注': record.remark || '',
+                                    '订单号': record.orderSN || orderSN,
+                                    '姓名': record.realName || '',
+                                    '还款类型': record.transactionSourceDesc || '',
+                                    '还款时间': record.finishTimeStr || '',
+                                    '还款金额': record.transactionAmount || '',
                                 });
                             }
                         }
@@ -1426,13 +1401,10 @@
                         Log.error(`查询还款失败 ${orderSN}:`, err);
                         this.results.push({
                             '订单号': orderSN,
-                            '交易流水号': '',
-                            '交易金额': '',
-                            '交易类型': '',
-                            '交易时间': '',
-                            '状态': '查询失败',
-                            '支付方式': '',
-                            '备注': err.message || '网络错误',
+                            '姓名': '',
+                            '还款类型': '',
+                            '还款时间': '',
+                            '还款金额': '查询失败：' + (err.message || '网络错误'),
                         });
                     }
                     completed++;
