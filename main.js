@@ -9,7 +9,7 @@
 
     // ========== 全局配置 ==========
     const CONFIG = {
-        version: '1.2.2',
+        version: '1.3.0',
         name: '爱租机小助手',
         logPrefix: '[爱租机小助手]',
         // 访问密码（远程校验，可随时改）
@@ -307,6 +307,21 @@
             const result = await Utils.get(url);
             return result;
         },
+
+        // 查询还款交易明细（分页）
+        async getTransactionDetailPage(orderSN, state, currPage = 1, pageSize = 100) {
+            const url = `${CONFIG.apiBase}/outOverdue/detail/transactionDetailPage`;
+            const body = {
+                orderSN: orderSN,
+                state: state !== '' ? state : undefined,
+                currPage: currPage,
+                pageSize: pageSize,
+            };
+            // 移除undefined字段
+            Object.keys(body).forEach(k => body[k] === undefined && delete body[k]);
+            const result = await Utils.post(url, body);
+            return result;
+        },
     };
 
     // ========== UI面板 ==========
@@ -435,11 +450,48 @@
                         <div class="azh-tab-pane" id="azh-tab-repayment">
                             <div class="azh-section">
                                 <h3>💰 批量查询还款状态</h3>
-                                <p class="azh-desc">功能开发中，敬请期待...</p>
-                                <div class="azh-hint" style="text-align:center;padding:30px 10px;">
-                                    🚧 该功能正在开发中<br><br>
-                                    后续版本上线
+                                <p class="azh-desc">批量查询订单还款交易明细，支持全部在库订单或Excel指定订单号</p>
+                                <div class="azh-form-group">
+                                    <label>查询方式：</label>
+                                    <div style="display:flex;gap:16px;margin-top:6px;">
+                                        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+                                            <input type="radio" name="repayment-mode" value="all" checked> 全部在库订单
+                                        </label>
+                                        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+                                            <input type="radio" name="repayment-mode" value="excel"> Excel指定订单号
+                                        </label>
+                                    </div>
                                 </div>
+                                <div class="azh-form-group" id="azh-repayment-file-group" style="display:none;">
+                                    <label>选择Excel文件：</label>
+                                    <input type="file" id="azh-repayment-file" accept=".xlsx,.xls" class="azh-file-input">
+                                    <div class="azh-hint" style="margin-top:6px;font-size:11px;">需包含订单号列（列名模糊匹配）</div>
+                                </div>
+                                <div class="azh-form-group">
+                                    <label>还款状态：</label>
+                                    <select id="azh-repayment-state" class="azh-input-text" style="width:100%;">
+                                        <option value="2">全部成功记录</option>
+                                        <option value="">全部状态</option>
+                                        <option value="1">处理中</option>
+                                        <option value="3">失败</option>
+                                        <option value="4">作废</option>
+                                        <option value="5">退票</option>
+                                    </select>
+                                </div>
+                                <div class="azh-form-group">
+                                    <label>并发数：</label>
+                                    <input type="number" id="azh-repayment-concurrency" value="2" min="1" max="20" class="azh-input-number">
+                                    <span style="font-size:12px;color:#94a3b8;margin-left:8px;">建议2-5</span>
+                                </div>
+                                <div class="azh-btn-group">
+                                    <button id="azh-repayment-start" class="azh-btn azh-btn-primary">🚀 开始查询</button>
+                                    <button id="azh-repayment-export" class="azh-btn azh-btn-secondary" style="display:none;">💾 导出结果</button>
+                                </div>
+                                <div id="azh-repayment-progress" class="azh-progress-box" style="display:none;">
+                                    <div class="azh-progress-bar"><div class="azh-progress-fill"></div></div>
+                                    <div class="azh-progress-text">进度：0 / 0</div>
+                                </div>
+                                <div id="azh-repayment-log" class="azh-log-box"></div>
                             </div>
                         </div>
 
@@ -1250,13 +1302,179 @@
         },
     };
 
-    // ========== 模块3：批量查询还款状态（待实现） ==========
+    // ========== 模块3：批量查询还款状态 ==========
     const RepaymentModule = {
         results: [],
         isRunning: false,
 
         async start() {
-            alert('功能开发中，敬请期待');
+            if (this.isRunning) return;
+
+            const mode = document.querySelector('input[name="repayment-mode"]:checked').value;
+            const state = document.getElementById('azh-repayment-state').value;
+            const concurrency = parseInt(document.getElementById('azh-repayment-concurrency').value) || CONFIG.concurrency;
+
+            let orderSNs = [];
+
+            this.isRunning = true;
+            this.results = [];
+            document.getElementById('azh-repayment-start').disabled = true;
+            document.getElementById('azh-repayment-export').style.display = 'none';
+            document.getElementById('azh-repayment-progress').style.display = 'block';
+            UI.updateProgress('repayment', 0, 1, 0, 0);
+            UI.clearLog('repayment');
+
+            try {
+                Log.group('批量查询还款状态');
+
+                // 获取订单号列表
+                if (mode === 'all') {
+                    UI.appendLog('repayment', '📋 正在获取全部在库订单...', 'info');
+                    orderSNs = await SmsModule.getAllOrderSNs();
+                    UI.appendLog('repayment', `✅ 共获取到 ${orderSNs.length} 个订单`, 'success');
+                } else {
+                    const fileInput = document.getElementById('azh-repayment-file');
+                    if (!fileInput.files.length) {
+                        alert('请先选择Excel文件！');
+                        this._cleanup();
+                        return;
+                    }
+                    UI.appendLog('repayment', '📄 正在解析Excel...', 'info');
+                    await Utils.ensureXLSX();
+                    const data = await Utils.readExcel(fileInput.files[0]);
+                    const firstRow = data[0];
+                    const keys = Object.keys(firstRow);
+                    const findKey = (keywords) => {
+                        for (const key of keys) {
+                            const lowerKey = key.toLowerCase().trim();
+                            for (const kw of keywords) {
+                                if (lowerKey.indexOf(kw.toLowerCase()) !== -1) return key;
+                            }
+                        }
+                        return null;
+                    };
+                    const orderKey = findKey(['订单号', 'orderSN', 'order_no', 'orderNo', '订单编号', '案件编号']);
+                    if (!orderKey) {
+                        alert('未找到订单号列，请检查Excel表头！');
+                        this._cleanup();
+                        return;
+                    }
+                    orderSNs = data.map(row => (row[orderKey] || '').toString().trim()).filter(s => s);
+                    UI.appendLog('repayment', `✅ 解析到 ${orderSNs.length} 个订单号`, 'success');
+                }
+
+                if (orderSNs.length === 0) {
+                    alert('没有找到有效的订单号！');
+                    this._cleanup();
+                    return;
+                }
+
+                const total = orderSNs.length;
+                let completed = 0;
+                let hasRecordCount = 0;
+
+                UI.appendLog('repayment', `🔍 开始查询 ${total} 个订单的还款记录，并发 ${concurrency}`, 'info');
+                UI.updateProgress('repayment', 0, total, 0, 0);
+
+                await Utils.asyncPool(concurrency, orderSNs, async (orderSN) => {
+                    try {
+                        // 随机延迟
+                        if (CONFIG.randomDelay.enabled) {
+                            await Utils.randomDelay(CONFIG.randomDelay.min, CONFIG.randomDelay.max);
+                        }
+
+                        const allRecords = [];
+                        let currPage = 1;
+                        let totalPages = 1;
+
+                        while (currPage <= totalPages) {
+                            const resp = await API.getTransactionDetailPage(orderSN, state, currPage, 100);
+                            if (resp && resp.success && resp.data) {
+                                const list = resp.data.records || resp.data.list || [];
+                                const totalCount = resp.data.totalCount || resp.data.total || 0;
+                                totalPages = Math.ceil(totalCount / 100) || 1;
+                                allRecords.push(...list);
+                            } else {
+                                break;
+                            }
+                            currPage++;
+                        }
+
+                        if (allRecords.length > 0) {
+                            hasRecordCount++;
+                            for (const record of allRecords) {
+                                this.results.push({
+                                    '订单号': orderSN,
+                                    '交易流水号': record.tradeNo || record.serialNo || '',
+                                    '交易金额': record.amount || record.payAmount || '',
+                                    '交易类型': record.bizType || record.tradeType || '',
+                                    '交易时间': record.createTime || record.payTime || record.tradeTime || '',
+                                    '状态': this._formatState(record.state),
+                                    '支付方式': record.payChannel || record.payWay || '',
+                                    '备注': record.remark || '',
+                                });
+                            }
+                        }
+                    } catch (err) {
+                        Log.error(`查询还款失败 ${orderSN}:`, err);
+                        this.results.push({
+                            '订单号': orderSN,
+                            '交易流水号': '',
+                            '交易金额': '',
+                            '交易类型': '',
+                            '交易时间': '',
+                            '状态': '查询失败',
+                            '支付方式': '',
+                            '备注': err.message || '网络错误',
+                        });
+                    }
+                    completed++;
+                    UI.updateProgress('repayment', completed, total, hasRecordCount, 0);
+                    if (completed % 20 === 0 || completed === total) {
+                        UI.appendLog('repayment', `⏳ 已完成 ${completed}/${total}（${hasRecordCount} 个有还款记录）`, 'info');
+                    }
+                });
+
+                Log.success(`查询完成，共 ${this.results.length} 条还款记录`);
+                UI.appendLog('repayment', `🎉 查询完成！共 ${hasRecordCount} 个订单有 ${this.results.length} 条还款记录`, 'success');
+                document.getElementById('azh-repayment-export').style.display = 'inline-block';
+
+            } catch (err) {
+                Log.error('批量查询还款失败:', err);
+                UI.appendLog('repayment', `❌ 操作失败: ${err.message}`, 'error');
+                alert('操作失败：' + err.message);
+            } finally {
+                this.isRunning = false;
+                document.getElementById('azh-repayment-start').disabled = false;
+                Log.groupEnd();
+            }
+        },
+
+        _formatState(state) {
+            const stateMap = {
+                1: '处理中',
+                2: '成功',
+                3: '失败',
+                4: '作废',
+                5: '退票',
+            };
+            return stateMap[state] || (state !== undefined && state !== null ? state : '');
+        },
+
+        async export() {
+            if (this.results.length === 0) {
+                alert('没有可导出的数据！');
+                return;
+            }
+            await Utils.exportExcel(this.results, `爱租机还款明细_${Utils.formatTime().replace(/[:\s-]/g, '')}.xlsx`);
+            Log.success('还款明细已导出');
+            UI.appendLog('repayment', '💾 结果已导出Excel', 'success');
+        },
+
+        _cleanup() {
+            this.isRunning = false;
+            document.getElementById('azh-repayment-start').disabled = false;
+            document.getElementById('azh-repayment-progress').style.display = 'none';
         },
     };
 
@@ -1281,11 +1499,25 @@
         setTimeout(() => CollectionModule.loadUserList(), 500);
         const repaymentBtn = document.getElementById('azh-repayment-start');
         if (repaymentBtn) repaymentBtn.onclick = () => RepaymentModule.start();
+        const repaymentExportBtn = document.getElementById('azh-repayment-export');
+        if (repaymentExportBtn) repaymentExportBtn.onclick = async () => RepaymentModule.export();
 
-        // 查询方式切换
+        // 查询方式切换 - 批量查订单
         document.querySelectorAll('input[name="sms-mode"]').forEach(radio => {
             radio.onchange = () => {
                 const fileGroup = document.getElementById('azh-sms-file-group');
+                if (radio.value === 'excel') {
+                    fileGroup.style.display = 'block';
+                } else {
+                    fileGroup.style.display = 'none';
+                }
+            };
+        });
+
+        // 查询方式切换 - 批量查还款
+        document.querySelectorAll('input[name="repayment-mode"]').forEach(radio => {
+            radio.onchange = () => {
+                const fileGroup = document.getElementById('azh-repayment-file-group');
                 if (radio.value === 'excel') {
                     fileGroup.style.display = 'block';
                 } else {
@@ -1322,6 +1554,10 @@
             const colConcurrencyEl = document.getElementById('azh-collection-concurrency');
             if (colConcurrencyEl) colConcurrencyEl.value = newConcurrency;
 
+            // 同步到批量查还款模块
+            const repayConcurrencyEl = document.getElementById('azh-repayment-concurrency');
+            if (repayConcurrencyEl) repayConcurrencyEl.value = newConcurrency;
+
             Log.success(`设置已保存：并发=${newConcurrency}，延迟=${delayEnabled ? delayMinSec + '~' + delayMaxSec + '秒' : '关闭'}`);
             alert(`设置已生效！\n并发数：${newConcurrency}\n延迟：${delayEnabled ? delayMinSec + '~' + delayMaxSec + '秒' : '已关闭'}`);
         };
@@ -1339,6 +1575,8 @@
             document.getElementById('azh-setting-delay-max').value = 8;
             document.getElementById('azh-sms-concurrency').value = 2;
             document.getElementById('azh-collection-concurrency').value = 2;
+            const repayConc = document.getElementById('azh-repayment-concurrency');
+            if (repayConc) repayConc.value = 2;
 
             Log.info('设置已恢复默认值');
             alert('已恢复默认设置：并发2，延迟2~8秒');
@@ -1351,6 +1589,8 @@
         document.getElementById('azh-setting-delay-max').value = CONFIG.randomDelay.max / 1000;
         document.getElementById('azh-sms-concurrency').value = CONFIG.concurrency;
         document.getElementById('azh-collection-concurrency').value = CONFIG.concurrency;
+        const repayConcEl = document.getElementById('azh-repayment-concurrency');
+        if (repayConcEl) repayConcEl.value = CONFIG.concurrency;
 
         initialized = true;
         Log.success('初始化完成！爱租机小助手已就绪');
