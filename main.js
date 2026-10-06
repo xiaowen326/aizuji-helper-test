@@ -839,6 +839,13 @@
             logBox.scrollTop = logBox.scrollHeight;
         },
 
+        // 清空日志
+        clearLog(tabId) {
+            const logBox = document.getElementById(`azh-${tabId}-log`);
+            if (!logBox) return;
+            logBox.innerHTML = '';
+        },
+
         // 更新进度条
         updateProgress(tabId, current, total, success = 0, failed = 0) {
             const progressBox = document.getElementById(`azh-${tabId}-progress`);
