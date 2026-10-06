@@ -313,6 +313,7 @@
             const url = `${CONFIG.apiBase}/outOverdue/detail/transactionDetailPage`;
             const body = {
                 orderSN: orderSN,
+                state: 2,
                 currPage: 1,
                 pageSize: pageSize,
             };
