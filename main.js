@@ -9,7 +9,7 @@
 
     // ========== 全局配置 ==========
     const CONFIG = {
-        version: '1.3.0',
+        version: '1.3.1',
         name: '爱租机小助手',
         logPrefix: '[爱租机小助手]',
         // 访问密码（远程校验，可随时改）
@@ -309,7 +309,7 @@
         },
 
         // 查询还款交易明细（只取前3条）
-        async getTransactionDetailPage(orderSN, pageSize = 3) {
+        async getTransactionDetailPage(orderSN, pageSize = 50) {
             const url = `${CONFIG.apiBase}/outOverdue/detail/transactionDetailPage`;
             const body = {
                 orderSN: orderSN,
@@ -465,8 +465,8 @@
                                     <input type="file" id="azh-repayment-file" accept=".xlsx,.xls" class="azh-file-input">
                                     <div class="azh-hint" style="margin-top:6px;font-size:11px;">需包含订单号列（列名模糊匹配）</div>
                                 </div>
-                                <div class="azh-hint" style="font-size:11px;color:#94a3b8;margin-bottom:8px;">
-                                    💡 每个订单取最近3条还款记录
+                                <div class="azh-hint" id="azh-repayment-month-hint" style="font-size:11px;color:#94a3b8;margin-bottom:8px;">
+                                    💡 显示当月还款记录
                                 </div>
                                 <div class="azh-form-group">
                                     <label>并发数：</label>
@@ -1379,11 +1379,17 @@
                             await Utils.randomDelay(CONFIG.randomDelay.min, CONFIG.randomDelay.max);
                         }
 
-                        const resp = await API.getTransactionDetailPage(orderSN, 3);
+                        const resp = await API.getTransactionDetailPage(orderSN, 50);
                         let allRecords = [];
                         if (resp && resp.success && resp.data) {
                             const list = resp.data.data || resp.data.records || resp.data.list || [];
-                            allRecords = list.slice(0, 3);
+                            // 只保留当月的还款记录
+                            const now = new Date();
+                            const currentMonth = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
+                            allRecords = list.filter(record => {
+                                const time = record.finishTimeStr || '';
+                                return time.indexOf(currentMonth) === 0;
+                            }).slice(0, 50);
                         }
 
                         if (allRecords.length > 0) {
@@ -1468,6 +1474,13 @@
 
         // 初始化UI
         UI.init();
+
+        // 更新还款模块的月份提示
+        const monthHint = document.getElementById('azh-repayment-month-hint');
+        if (monthHint) {
+            const now = new Date();
+            monthHint.innerHTML = '💡 显示 ' + now.getFullYear() + '年' + (now.getMonth() + 1) + '月 的还款记录';
+        }
 
         // 绑定功能按钮
         document.getElementById('azh-sms-start').onclick = () => SmsModule.start();
